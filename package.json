@@ -1,146 +1,170 @@
 {
-  "name": "auto-git-copilot",
-  "displayName": "AutoGit-AI",
-  "description": "Automatically stage, commit, and push changes with AI-generated commit messages using GitHub Copilot",
-  "version": "1.0.6",
-  "publisher": "ShreyaBoyane",
-  "license": "Apache-2.0 license",
-  "icon": "icon.png",
-  "author": {
-    "name": "Shreya Boyane",
-    "email": "shreya.boyane@gmail.com"
-  },
-  "engines": {
-    "vscode": "^1.60.0"
-  },
-  "categories": ["Other", "SCM Providers"],
-  "keywords": ["git", "auto-commit", "copilot", "ai", "automation", "github", "commit-messages", "productivity"],
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/Sonica-B/AutoGit.git"
-  },
-  "bugs": {
-    "url": "https://github.com/Sonica-B/AutoGit/issues"
-  },
-  "homepage": "https://github.com/Sonica-B/AutoGit#readme",
-  "activationEvents": [
-    "onStartupFinished"
-  ],
-  "main": "./extension.js",
-  "galleryBanner": {
-    "color": "#2D2D30",
-    "theme": "dark"
-  },
-  "contributes": {
-    "commands": [
-      {
-        "command": "autoGitCopilot.toggle",
-        "title": "Toggle Auto Git",
-        "category": "Auto Git",
-        "icon": "$(git-branch)"
-      },
-      {
-        "command": "autoGitCopilot.commitNow",
-        "title": "Commit Changes Now",
-        "category": "Auto Git",
-        "icon": "$(git-commit)"
-      },
-      {
-        "command": "autoGitCopilot.test",
-        "title": "Test Extension",
-        "category": "Auto Git",
-        "icon": "$(debug)"
-      }
-    ],
-    "menus": {
-      "commandPalette": [
-        {
-          "command": "autoGitCopilot.toggle",
-          "when": "workspaceFolderCount > 0"
-        },
-        {
-          "command": "autoGitCopilot.commitNow",
-          "when": "workspaceFolderCount > 0"
-        },
-        {
-          "command": "autoGitCopilot.test",
-          "when": "workspaceFolderCount > 0"
-        }
-      ]
-    },
-    "configuration": {
-      "title": "Auto Git with Copilot",
-      "properties": {
-        "autoGitCopilot.enabled": {
-          "type": "boolean",
-          "default": false,
-          "description": "Enable automatic git operations on file save",
-          "order": 1
-        },
-        "autoGitCopilot.delayMs": {
-          "type": "number",
-          "default": 3000,
-          "minimum": 1000,
-          "maximum": 30000,
-          "description": "Delay in milliseconds before triggering git operations after file save (1000-30000ms)",
-          "order": 2
-        },
-        "autoGitCopilot.includeUntracked": {
-          "type": "boolean",
-          "default": true,
-          "description": "Include untracked files in automatic commits",
-          "order": 3
-        },
-        "autoGitCopilot.maxCommitMessageLength": {
-          "type": "number",
-          "default": 72,
-          "minimum": 20,
-          "maximum": 200,
-          "description": "Maximum length for commit messages (20-200 characters)",
-          "order": 4
-        },
-        "autoGitCopilot.excludePatterns": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "default": [
-            "node_modules/**",
-            ".git/**",
-            "*.log",
-            ".env*",
-            "dist/**",
-            "build/**",
-            "*.tmp",
-            "*.temp",
-            ".DS_Store",
-            "Thumbs.db",
-            "*.vsix",
-            ".vscode-test/**",
-            "coverage/**",
-            "*.lock",
-            ".git/",
-            ".gitignore",
-            ".gitattributes"
-          ],
-          "description": "File patterns to exclude from auto-commit (glob patterns supported)",
-          "order": 5
-        }
-      }
-    }
-  },
-  "dependencies": {},
-  "devDependencies": {
-    "@types/vscode": "^1.60.0",
-    "@types/node": "^16.x"
-  },
-  "scripts": {
-    "vscode:prepublish": "npm run compile",
-    "compile": "echo 'No compilation needed for JavaScript'",
-    "watch": "echo 'No watch needed for JavaScript'",
-    "pretest": "npm run compile && npm run lint",
-    "lint": "echo 'No linting configured'",
-    "test": "echo 'No tests configured'",
-    "package": "vsce package"
-  }
+	"name": "auto-git-copilot",
+	"displayName": "AutoGit-AI",
+	"description": "Automatically stage, commit, and push changes with AI-generated commit messages using GitHub Copilot",
+	"version": "1.0.6",
+	"publisher": "ShreyaBoyane",
+	"license": "Apache-2.0 license",
+	"icon": "icon.png",
+	"author": {
+		"name": "Shreya Boyane",
+		"email": "shreya.boyane@gmail.com"
+	},
+	"engines": {
+		"vscode": "^1.60.0"
+	},
+	"categories": [
+		"Other",
+		"SCM Providers"
+	],
+	"keywords": [
+		"git",
+		"auto-commit",
+		"copilot",
+		"ai",
+		"automation",
+		"github",
+		"commit-messages",
+		"productivity"
+	],
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/Sonica-B/AutoGit.git"
+	},
+	"bugs": {
+		"url": "https://github.com/Sonica-B/AutoGit/issues"
+	},
+	"homepage": "https://github.com/Sonica-B/AutoGit#readme",
+	"activationEvents": [
+		"onStartupFinished"
+	],
+	"main": "./extension.js",
+	"galleryBanner": {
+		"color": "#2D2D30",
+		"theme": "dark"
+	},
+	"contributes": {
+		"commands": [
+			{
+				"command": "autoGitCopilot.toggle",
+				"title": "Toggle Auto Git",
+				"category": "Auto Git",
+				"icon": "$(git-branch)"
+			},
+			{
+				"command": "autoGitCopilot.commitNow",
+				"title": "Commit Changes Now",
+				"category": "Auto Git",
+				"icon": "$(git-commit)"
+			},
+			{
+				"command": "autoGitCopilot.test",
+				"title": "Test Extension",
+				"category": "Auto Git",
+				"icon": "$(debug)"
+			}
+		],
+		"menus": {
+			"commandPalette": [
+				{
+					"command": "autoGitCopilot.toggle",
+					"when": "workspaceFolderCount > 0"
+				},
+				{
+					"command": "autoGitCopilot.commitNow",
+					"when": "workspaceFolderCount > 0"
+				},
+				{
+					"command": "autoGitCopilot.test",
+					"when": "workspaceFolderCount > 0"
+				}
+			]
+		},
+		"configuration": {
+			"title": "Auto Git with Copilot",
+			"properties": {
+				"autoGitCopilot.enabled": {
+					"type": "boolean",
+					"default": false,
+					"description": "Enable automatic git operations on file save",
+					"order": 1
+				},
+				"autoGitCopilot.delayMs": {
+					"type": "number",
+					"default": 3000,
+					"minimum": 1000,
+					"maximum": 30000,
+					"description": "Delay in milliseconds before triggering git operations after file save (1000-30000ms)",
+					"order": 2
+				},
+				"autoGitCopilot.includeUntracked": {
+					"type": "boolean",
+					"default": true,
+					"description": "Include untracked files in automatic commits",
+					"order": 3
+				},
+				"autoGitCopilot.maxCommitMessageLength": {
+					"type": "number",
+					"default": 72,
+					"minimum": 20,
+					"maximum": 200,
+					"description": "Maximum length for commit messages (20-200 characters)",
+					"order": 4
+				},
+				"autoGitCopilot.commitMessagePrompt": {
+					"type": "string",
+					"editPresentation": "multilineText",
+					"default": "Create a Git commit message that follows best practices.\n\nThe message should consist of a subject line and an optional but recommended body.\n\nFORMAT RULES:\n- The subject line MUST be imperative (e.g. ‘Fix bug’, ‘Add feature’).\n- The subject line MUST be limited to 50 characters.\n- The body MUST explain WHY this change is necessary and HOW it solves the problem.\n- The body MUST be wrapped at 72 characters per line.\n\nCODE DESCRIPTION:\n{file_changes}",
+					"description": "Prompt template for the AI commit message generation. Use {file_changes} as placeholder for the diff.",
+					"order": 5
+				},
+				"autoGitCopilot.excludePatterns": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"default": [
+						"node_modules/**",
+						".git/**",
+						"*.log",
+						".env*",
+						"dist/**",
+						"build/**",
+						"*.tmp",
+						"*.temp",
+						".DS_Store",
+						"Thumbs.db",
+						"*.vsix",
+						".vscode-test/**",
+						"coverage/**",
+						"*.lock",
+						".git/",
+						".gitignore",
+						".gitattributes"
+					],
+					"description": "File patterns to exclude from auto-commit (glob patterns supported)",
+					"order": 5
+				}
+			}
+		}
+	},
+	"dependencies": {},
+	"devDependencies": {
+		"@types/vscode": "^1.60.0",
+		"@types/node": "^16.x"
+	},
+	"scripts": {
+		"vscode:prepublish": "npm run compile",
+		"compile": "echo 'No compilation needed for JavaScript'",
+		"watch": "echo 'No watch needed for JavaScript'",
+		"pretest": "npm run compile && npm run lint",
+		"lint": "echo 'No linting configured'",
+		"test": "echo 'No tests configured'",
+		"package": "vsce package"
+	},
+	"__metadata": {
+		"installedTimestamp": 1764714927970,
+		"targetPlatform": "undefined",
+		"size": 72754
+	}
 }

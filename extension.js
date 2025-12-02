@@ -29,7 +29,22 @@ function activate(context) {
         }
 
         workspacePath = workspaceFolders[0].uri.fsPath;
+        
+        // [FIX] Try to set workspacePath to the active editor's folder if available
+        if (vscode.window.activeTextEditor) {
+            const activeFolder = vscode.workspace.getWorkspaceFolder(vscode.window.activeTextEditor.document.uri);
+            if (activeFolder) {
+                workspacePath = activeFolder.uri.fsPath;
+            }
+        }
+        
         console.log('Auto Git: Workspace initialized:', workspacePath);
+
+        // [FIX] Initial check: Is this a git repo? If not, don't error out immediately, just warn log.
+        // We wait for file events to find the real repo.
+        execAsync('git rev-parse --git-dir', { cwd: workspacePath })
+            .then(() => console.log('Auto Git: Initial path is a valid git repo'))
+            .catch(() => console.log('Auto Git: Initial path is NOT a git repo (yet). Waiting for file activity.'));
 
         // Create status bar item
         statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
@@ -131,6 +146,9 @@ function activate(context) {
         console.log('Auto Git extension activation completed successfully');
         vscode.window.showInformationMessage('Auto Git with Copilot loaded successfully!');
         
+        // Ensure status bar is up to date at the end of activation
+        updateStatusBar();
+        
     } catch (error) {
         console.error('Auto Git extension activation failed:', error);
         vscode.window.showErrorMessage(`Auto Git extension failed to load: ${error.message}`);
@@ -167,18 +185,20 @@ function setupFileChangeDetection(context) {
         console.error('Auto Git: Failed to create file system watcher:', fsWatcherError);
     }
     
-    // Method 2: Text Document Change Detection (detects when files are modified)
+    // Method 2: Text Document Save Detection (detects when files are saved)
     try {
-        const textChangeListener = vscode.workspace.onDidChangeTextDocument((event) => {
-            if (event.document.uri.scheme === 'file') {
-                handleFileChange(event.document.uri, 'text-changed');
+        // [CHANGE] Use onDidSaveTextDocument instead of onDidChangeTextDocument
+        // to avoid triggering on every keystroke. Only trigger on save.
+        const saveListener = vscode.workspace.onDidSaveTextDocument((document) => {
+            if (document.uri.scheme === 'file') {
+                handleFileChange(document.uri, 'saved');
             }
         });
         
-        context.subscriptions.push(textChangeListener);
-        console.log('Auto Git: Text change listener created successfully');
-    } catch (textChangeError) {
-        console.error('Auto Git: Failed to create text change listener:', textChangeError);
+        context.subscriptions.push(saveListener);
+        console.log('Auto Git: Save listener created successfully');
+    } catch (saveError) {
+        console.error('Auto Git: Failed to create save listener:', saveError);
     }
     
     // Method 3: Periodic Git Status Check (fallback)
@@ -202,18 +222,106 @@ function setupFileChangeDetection(context) {
     console.log('Auto Git: Alternative file change detection setup complete');
 }
 
-function handleFileChange(uri, changeType) {
+const fs = require('fs');
+
+async function handleFileChange(uri, changeType) {
     if (!isEnabled) return;
+
+    // [FIX] Ignore .git folder immediately to prevent loops and unnecessary processing
+    if (uri.fsPath.includes(`${path.sep}.git${path.sep}`) || uri.fsPath.endsWith(`${path.sep}.git`)) {
+        return;
+    }
     
+    console.debug(`Auto Git [DEBUG]: Handling file change for ${uri.fsPath}`);
+
+    // [FIX] Update workspacePath to the real git root of the file
+    const fileDir = path.dirname(uri.fsPath);
+    let newWorkspacePath = null;
+
+    // Strategy 1: Ask Git directly (Most reliable source of truth)
+    try {
+        console.debug(`Auto Git [DEBUG]: Asking git for root of ${fileDir}`);
+        const { stdout } = await execAsync('git rev-parse --show-toplevel', { cwd: fileDir });
+        const gitRoot = stdout.trim();
+        if (gitRoot) {
+            console.debug(`Auto Git [DEBUG]: Git reported root as ${gitRoot}`);
+            newWorkspacePath = gitRoot;
+        }
+    } catch (error) {
+        console.debug(`Auto Git [DEBUG]: Git detection failed for ${fileDir}:`, error.message);
+    }
+
+    // Strategy 2: Manual .git folder search (Fallback)
+    if (!newWorkspacePath) {
+        try {
+            let currentDir = fileDir;
+            const rootDir = path.parse(currentDir).root;
+            console.debug(`Auto Git [DEBUG]: Starting manual search from ${currentDir}`);
+            
+            while (currentDir !== rootDir) {
+                const gitPath = path.join(currentDir, '.git');
+                if (fs.existsSync(gitPath)) {
+                    console.debug(`Auto Git [DEBUG]: Found .git at ${gitPath}`);
+                    newWorkspacePath = currentDir;
+                    break;
+                }
+                const parentDir = path.dirname(currentDir);
+                if (parentDir === currentDir) break; // Safety break
+                currentDir = parentDir;
+            }
+        } catch (e) {
+            console.debug('Auto Git [DEBUG]: Error checking .git folder:', e);
+        }
+    }
+
+    // Apply the new workspace path
+    if (newWorkspacePath) {
+        if (newWorkspacePath !== workspacePath) {
+            console.log(`Auto Git: Switching workspace context from ${workspacePath} to ${newWorkspacePath}`);
+            workspacePath = newWorkspacePath;
+            changeTracker.clear();
+            
+            // Re-enable if it was disabled, because we found a valid repo now!
+            if (!isEnabled) {
+                 // Note: We don't auto-enable here to respect user choice, 
+                 // but we could update status bar to show it's ready.
+            }
+            // Force status bar update to reflect we are in a valid repo now
+            updateStatusBar(); 
+        }
+    } else {
+        console.debug(`Auto Git [DEBUG]: No git root found for ${uri.fsPath}. Ignoring file.`);
+        // [CRITICAL FIX] If the file is not in a git repo, DO NOT schedule operations.
+        // This prevents the extension from trying to run git commands in the root workspace folder
+        // which might not be a git repo, causing the "Not a git repository" error.
+        return;
+    }
+
     // Check if file should be excluded
     const config = vscode.workspace.getConfiguration('autoGitCopilot');
     const excludePatterns = config.get('excludePatterns', []);
+    
+    // [FIX] relativePath calculation was wrong because workspacePath changes dynamically now.
+    // We should check exclusion based on the filename or path relative to the git root.
     const relativePath = path.relative(workspacePath, uri.fsPath);
+    const repoName = path.basename(workspacePath);
     
     const shouldExclude = excludePatterns.some(pattern => {
         try {
-            const regex = new RegExp(pattern.replace(/\*\*/g, '.*').replace(/\*/g, '[^/]*'));
-            return regex.test(relativePath);
+            // [FIX] Improved regex matching to handle simple wildcards better
+            // If pattern is just "*.log", we want to match "file.log" anywhere
+            let regexPattern;
+            if (pattern.startsWith('*') && !pattern.includes('/')) {
+                 // Simple extension match like "*.log" -> match end of string
+                 regexPattern = pattern.replace(/\./g, '\\.').replace(/\*/g, '.*') + '$';
+            } else {
+                 // Standard glob-like match
+                 regexPattern = pattern.replace(/\*\*/g, '.*').replace(/\*/g, '[^/]*');
+            }
+            
+            const regex = new RegExp(regexPattern);
+            // Check relative path, filename, AND repo name (to allow excluding whole repos)
+            return regex.test(relativePath) || regex.test(path.basename(uri.fsPath)) || regex.test(repoName);
         } catch (regexError) {
             console.warn(`Auto Git: Invalid pattern ${pattern}:`, regexError);
             return false;
@@ -274,6 +382,8 @@ function stopFileMonitoring() {
 function updateStatusBar() {
     if (!statusBarItem) return;
     
+    console.debug(`Auto Git [DEBUG]: Updating status bar. Enabled: ${isEnabled}`);
+
     if (isEnabled) {
         statusBarItem.text = `$(git-branch) Auto Git: ON`;
         statusBarItem.tooltip = 'Auto Git is enabled. Click to disable.';
@@ -303,11 +413,43 @@ async function performGitOperations() {
             await execAsync('git rev-parse --git-dir', { cwd: workspacePath });
             console.log('Auto Git: Confirmed git repository');
         } catch (error) {
-            console.error('Auto Git: Not a git repository:', error);
-            vscode.window.showErrorMessage('Auto Git: Not a git repository');
-            updateStatusBar();
+            console.error('Auto Git: Not a git repository at', workspacePath, ':', error);
+            
+            // [CHANGE] Do not disable extension globally, just skip this operation
+            // isEnabled = false;
+            // updateStatusBar();
+            // vscode.window.showErrorMessage(`Auto Git: Disabled. Not a git repository at ${workspacePath}`);
+            
+            console.log(`Auto Git: Skipping operations because ${workspacePath} is not a git repo.`);
             return;
         }
+
+        // ============================================================
+        // [START] CHANGE: Always switch to branch "autocommit"
+        // ============================================================
+        try {
+            // Get current branch
+            const { stdout: currentBranch } = await execAsync('git branch --show-current', { cwd: workspacePath });
+            
+            if (currentBranch.trim() !== 'autocommit') {
+                console.log('Auto Git: Switching to autocommit branch...');
+                // Try checkout to 'autocommit'. 
+                // If error (e.g. does not exist), create it with -b
+                await execAsync('git checkout autocommit 2>/dev/null || git checkout -b autocommit', { cwd: workspacePath });
+                console.log('Auto Git: Switched to autocommit branch');
+            }
+        } catch (branchError) {
+            console.error('Auto Git: Failed to switch branch:', branchError);
+            vscode.window.showErrorMessage(`Auto Git Error: Could not switch to branch 'autocommit': ${branchError.message}`);
+            updateStatusBar();
+            return; // Abort if branch switch fails
+        }
+        // ============================================================
+        // [END] CHANGE
+        // ============================================================
+
+
+
 
         // Get git status
         const { stdout: statusOutput } = await execAsync('git status --porcelain', { cwd: workspacePath });
@@ -323,7 +465,8 @@ async function performGitOperations() {
 
         // Stage files based on configuration
         const config = vscode.workspace.getConfiguration('autoGitCopilot');
-        const includeUntracked = config.get('includeUntracked', true);
+        // [CHANGE] Default to false to prevent adding untracked files automatically
+        const includeUntracked = config.get('includeUntracked', false);
         
         if (includeUntracked) {
             await execAsync('git add .', { cwd: workspacePath });
@@ -343,11 +486,11 @@ async function performGitOperations() {
         await execAsync(`git commit -m "${escapedMessage}"`, { cwd: workspacePath });
         console.log('Auto Git: Changes committed successfully');
         
-        // Push changes
-        await execAsync('git push', { cwd: workspacePath });
-        console.log('Auto Git: Changes pushed successfully');
+        // Push changes (DISABLED)
+        // await execAsync('git push', { cwd: workspacePath });
+        // console.log('Auto Git: Changes pushed successfully');
         
-        vscode.window.showInformationMessage(`Auto Git: Committed and pushed: "${commitMessage}"`);
+        vscode.window.showInformationMessage(`Auto Git: Committed: "${commitMessage}"`);
         updateStatusBar();
         
     } catch (error) {
@@ -358,7 +501,8 @@ async function performGitOperations() {
         if (errorMessage.includes('nothing to commit')) {
             console.log('Auto Git: Nothing to commit (already up to date)');
             updateStatusBar();
-            return;
+            } else if (errorMessage.includes('Insufficient permission') || errorMessage.includes('Access is denied')) {
+                errorMessage = `FileSystem Error: Missing write permissions in .git folder at ${workspacePath}/.git. Please check permissions (e.g. using chown/chmod).`;
         } else if (errorMessage.includes('Permission denied') || errorMessage.includes('authentication')) {
             errorMessage = 'Git authentication failed. Check your SSH keys or credentials.';
         } else if (errorMessage.includes('remote rejected')) {
@@ -378,7 +522,10 @@ async function generateCommitMessage(statusOutput) {
         const lines = statusOutput.trim().split('\n').filter(line => line.trim());
         const changedFiles = lines.map(line => {
             const status = line.substring(0, 2);
-            const filename = line.substring(3);
+            // [FIX] Use substring(2).trim() instead of substring(3) to be more robust
+            // This handles cases where whitespace might be different or missing,
+            // and prevents cutting off the first character of the filename.
+            const filename = line.substring(2).trim();
             return {
                 path: filename,
                 status: getFileStatusFromCode(status)
@@ -389,25 +536,52 @@ async function generateCommitMessage(statusOutput) {
             return 'Auto-commit: Update files';
         }
 
+        // [CHANGE] Fetch git diff to provide better context for the AI
+        let diffOutput = '';
+        try {
+            // Files are already staged at this point, so we use --cached to see what will be committed
+            const { stdout } = await execAsync('git diff --cached', { cwd: workspacePath });
+            diffOutput = stdout || '';
+            
+            // Truncate diff if it's too large (approx 20KB) to avoid token limits
+            if (diffOutput.length > 20000) {
+                diffOutput = diffOutput.substring(0, 20000) + '\n...(Diff truncated)...';
+            }
+        } catch (diffError) {
+            console.warn('Auto Git: Failed to fetch git diff:', diffError);
+        }
+
         // Create context for Copilot
-        const context = `Generate a concise commit message for the following changes:
-${changedFiles.map(f => `${f.status}: ${f.path}`).join('\n')}
+        const config = vscode.workspace.getConfiguration('autoGitCopilot');
+        let promptTemplate = config.get('commitMessagePrompt');
+        
+        const fileSummary = changedFiles.map(f => `${f.status}: ${f.path}`).join('\n');
+        // Combine summary and diff
+        const fileChanges = diffOutput ? `${fileSummary}\n\nDIFF:\n${diffOutput}` : fileSummary;
 
-Guidelines:
-- Be concise and descriptive (under 72 characters)
-- Follow conventional commit format when applicable (feat:, fix:, docs:, refactor:, etc.)
-- Describe WHAT was changed, not HOW
-- Use present tense ("add" not "added")
+        if (!promptTemplate) {
+            promptTemplate = `
+            Create a Git commit message that follows best practices.
 
-Examples:
-- "feat: add user authentication system"
-- "fix: resolve login validation bug"
-- "docs: update API documentation"
-- "refactor: simplify error handling logic"
-- "style: improve code formatting"
-- "test: add unit tests for user service"
+            The message should consist of a subject line and an optional but recommended body.
 
-Generate only the commit message, no quotes or explanation.`;
+            FORMAT RULES:
+            - The subject line MUST be imperative (e.g. ‘Fix bug’, ‘Add feature’).
+            - The subject line MUST be limited to 50 characters.
+            - The body MUST explain WHY this change is necessary and HOW it solves the problem.
+            - The body MUST be wrapped at 72 characters per line.
+
+            CODE DESCRIPTION:
+            {file_changes}
+            `;
+        }
+
+        let context = promptTemplate;
+        if (context.includes('{file_changes}')) {
+            context = context.replace('{file_changes}', fileChanges);
+        } else {
+            context = `${context}\n\nCODE DESCRIPTION:\n${fileChanges}`;
+        }
 
         console.log('Auto Git: Attempting to generate AI commit message...');
 
@@ -441,10 +615,6 @@ Generate only the commit message, no quotes or explanation.`;
                         (commitMessage.startsWith("'") && commitMessage.endsWith("'"))) {
                         commitMessage = commitMessage.slice(1, -1);
                     }
-
-                    // Remove any extra explanations after the commit message
-                    const lines = commitMessage.split('\n');
-                    commitMessage = lines[0].trim();
 
                     // Remove any remaining quotes or backticks
                     commitMessage = commitMessage.replace(/["`']/g, '');
