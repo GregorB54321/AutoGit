@@ -13,6 +13,9 @@ let fileSystemWatcher;
 let changeTracker = new Set();
 let lastCheckTime = 0;
 
+
+// ToDo: push to default remote repo? (false if no repo given, else true), try to login...
+
 /**
  * @param {vscode.ExtensionContext} context
  */
@@ -294,6 +297,10 @@ async function handleFileChange(uri, changeType) {
         // [CRITICAL FIX] If the file is not in a git repo, DO NOT schedule operations.
         // This prevents the extension from trying to run git commands in the root workspace folder
         // which might not be a git repo, causing the "Not a git repository" error.
+        
+        if (changeType === 'saved') {
+            vscode.window.showWarningMessage(`Auto Git: File '${path.basename(uri.fsPath)}' is not in a git repository and will not be committed.`);
+        }
         return;
     }
 
@@ -330,6 +337,9 @@ async function handleFileChange(uri, changeType) {
 
     if (shouldExclude) {
         console.log(`Auto Git: Excluding file ${relativePath} (${changeType})`);
+        if (changeType === 'saved') {
+            vscode.window.showWarningMessage(`Auto Git: File '${path.basename(uri.fsPath)}' is excluded by pattern and will not be committed.`);
+        }
         return;
     }
 
@@ -705,3 +715,4 @@ module.exports = {
     activate,
     deactivate
 };
+
